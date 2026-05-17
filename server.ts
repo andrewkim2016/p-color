@@ -6,59 +6,46 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const isProduction = process.env.NODE_ENV === "production" || process.env.NODE_ENV === "preview";
-console.log(`[INIT] Running in ${isProduction ? "PRODUCTION" : "DEVELOPMENT"} mode`);
+const isProductionMode = process.env.NODE_ENV === "production" || process.env.NODE_ENV === "preview" || !!process.env.K_SERVICE;
+console.log(`[INIT] Running in ${isProductionMode ? "PRODUCTION" : "DEVELOPMENT"} mode`);
 
 const app = express();
 const PORT = 3000;
 
-// Increase limit for image uploads - must be before routes
+// 1. 기본 미들웨어 설정
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Log all requests for debugging
+// 2. 로깅 미들웨어
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
   next();
 });
 
-// Setup Gemini
-const apiKey = process.env.GEMINI_API_KEY;
-console.log(`[INIT] Gemini API Key present: ${!!apiKey}`);
-
-const ai = new GoogleGenAI({
-  apiKey: apiKey || '',
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    }
-  }
-});
-
-// API Routes - Define these explicitly BEFORE any other middleware
+// 3. API 라우트 정의 (정적 파일보다 무조건 앞에 위치)
 app.get("/api/health", (req, res) => {
   res.json({ 
     status: "ok", 
     mode: process.env.NODE_ENV,
-    time: new Date().toISOString(),
-    apiKeySet: !!apiKey
+    isProduction: isProductionMode,
+    time: new Date().toISOString()
   });
 });
 
 app.post("/api/analyze", async (req, res) => {
-  console.log("Analysis request received at /api/analyze");
+  console.log("[API] Analysis request received");
   try {
+    const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      console.error("GEMINI_API_KEY is missing");
-      return res.status(500).json({ error: "API 키가 설정되지 않았습니다. 설정에서 API 키를 확인해주세요." });
+      console.error("[ERROR] GEMINI_API_KEY is missing");
+      return res.status(500).json({ error: "시스템 설정 오류: API 키가 없습니다." });
     }
 
     const { image } = req.body;
     if (!image) {
-      return res.status(400).json({ error: "이미지가 전송되지 않았습니다." });
+      return res.status(400).json({ error: "이미지 데이터가 없습니다." });
     }
 
-    // Extract base64 content
     const base64Data = image.split(",")[1] || image;
     const mimeType = image.split(";")[0]?.split(":")[1] || "image/jpeg";
 
@@ -145,29 +132,16 @@ app.post("/api/analyze", async (req, res) => {
       }
     });
 
-    const text = result.text;
-    if (!text) {
-      throw new Error("Gemini로부터 응답을 받지 못했습니다.");
-    }
-
-    try {
-      res.json(JSON.parse(text));
-    } catch (parseError) {
-      console.error("JSON Parse error:", text);
-      const jsonStr = text.replace(/```json/g, "").replace(/```/g, "").trim();
-      res.json(JSON.parse(jsonStr));
-    }
+    res.json(JSON.parse(result.text));
+    console.log("[API] Analysis completed");
   } catch (error: any) {
-    console.error("Analysis route error:", error);
-    const message = error.message || "이미지 분석 중 오류가 발생했습니다.";
-    res.status(500).json({ error: message });
+    console.error("[ERROR] Analysis route error:", error);
+    res.status(500).json({ error: error.message || "이미지 분석 중 오류가 발생했습니다." });
   }
 });
 
-// Vite middleware setup
+// 4. 서버 시작 및 정적 파일/Vite 설정
 async function startServer() {
-  const isProductionMode = process.env.NODE_ENV === "production" || process.env.NODE_ENV === "preview";
-
   if (!isProductionMode) {
     console.log("[SERVER] Starting Vite middleware (Development)");
     const vite = await createViteServer({
@@ -176,21 +150,21 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    console.log("[SERVER] Serving static files from ./dist (Production)");
     const distPath = path.resolve(process.cwd(), 'dist');
+    console.log(`[SERVER] Serving static files from: ${distPath}`);
     
-    // Explicitly handle unhandled /api requests before static/wildcard
+    app.use(express.static(distPath));
+    
+    // API 404 Catch-all (중요: 정적 파일 이후, 와일드카드 전)
     app.all('/api/*', (req, res) => {
-      console.warn(`[WARN] Unmatched API path: ${req.method} ${req.url}`);
       res.status(404).json({ error: `API 경로를 찾을 수 없습니다: ${req.url}` });
     });
 
-    app.use(express.static(distPath));
     app.get('*', (req, res) => {
-      res.setHeader('Content-Type', 'text/html');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[SERVER] Listening on 0.0.0.0:${PORT}`);
