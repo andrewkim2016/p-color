@@ -1,0 +1,8 @@
+{
+  "name": "Personal Color Consultant",
+  "description": "AI-powered personal color analysis based on your photo. Upload your selfie to find your perfect palette.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
