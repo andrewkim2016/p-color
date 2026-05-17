@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -10,12 +10,17 @@ const app = express();
 const PORT = 3000;
 
 // Increase limit for image uploads to handle high-res photos
-app.use(express.json({ limit: '20mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Setup Gemini
 const apiKey = process.env.GEMINI_API_KEY;
+
+// Log initialization status
+console.log(`Gemini API Initialized: ${apiKey ? 'YES' : 'NO'}`);
+
 const ai = new GoogleGenAI({
-  apiKey: apiKey,
+  apiKey: apiKey || '',
   httpOptions: {
     headers: {
       'User-Agent': 'aistudio-build',
@@ -23,7 +28,12 @@ const ai = new GoogleGenAI({
   }
 });
 
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", mode: process.env.NODE_ENV });
+});
+
 app.post("/api/analyze", async (req, res) => {
+  console.log("Analysis request received");
   try {
     if (!apiKey) {
       console.error("GEMINI_API_KEY is missing");
@@ -55,62 +65,62 @@ app.post("/api/analyze", async (req, res) => {
       config: {
         responseMimeType: "application/json",
         responseSchema: {
-          type: "OBJECT",
+          type: Type.OBJECT,
           properties: {
-            disclaimer: { type: "STRING" },
-            summary: { type: "STRING" },
-            tone_direction: { type: "STRING" },
-            season_type: { type: "STRING" },
-            sub_type: { type: "STRING" },
-            confidence: { type: "NUMBER" },
+            disclaimer: { type: Type.STRING },
+            summary: { type: Type.STRING },
+            tone_direction: { type: Type.STRING },
+            season_type: { type: Type.STRING },
+            sub_type: { type: Type.STRING },
+            confidence: { type: Type.NUMBER },
             analysis: {
-              type: "OBJECT",
+              type: Type.OBJECT,
               properties: {
-                skin_tone: { type: "STRING" },
-                brightness: { type: "STRING" },
-                saturation: { type: "STRING" },
-                contrast: { type: "STRING" },
-                overall_impression: { type: "STRING" }
+                skin_tone: { type: Type.STRING },
+                brightness: { type: Type.STRING },
+                saturation: { type: Type.STRING },
+                contrast: { type: Type.STRING },
+                overall_impression: { type: Type.STRING }
               },
               required: ["skin_tone", "brightness", "saturation", "contrast", "overall_impression"]
             },
             recommended_colors: {
-              type: "ARRAY",
+              type: Type.ARRAY,
               items: {
-                type: "OBJECT",
+                type: Type.OBJECT,
                 properties: {
-                  name: { type: "STRING" },
-                  hex: { type: "STRING" },
-                  reason: { type: "STRING" }
+                  name: { type: Type.STRING },
+                  hex: { type: Type.STRING },
+                  reason: { type: Type.STRING }
                 },
                 required: ["name", "hex", "reason"]
               }
             },
             avoid_colors: {
-              type: "ARRAY",
+              type: Type.ARRAY,
               items: {
-                type: "OBJECT",
+                type: Type.OBJECT,
                 properties: {
-                  name: { type: "STRING" },
-                  hex: { type: "STRING" },
-                  reason: { type: "STRING" }
+                  name: { type: Type.STRING },
+                  hex: { type: Type.STRING },
+                  reason: { type: Type.STRING }
                 },
                 required: ["name", "hex", "reason"]
               }
             },
             makeup_recommendations: {
-              type: "OBJECT",
+              type: Type.OBJECT,
               properties: {
-                lip: { type: "ARRAY", items: { type: "STRING" } },
-                blush: { type: "ARRAY", items: { type: "STRING" } },
-                eyeshadow: { type: "ARRAY", items: { type: "STRING" } }
+                lip: { type: Type.ARRAY, items: { type: Type.STRING } },
+                blush: { type: Type.ARRAY, items: { type: Type.STRING } },
+                eyeshadow: { type: Type.ARRAY, items: { type: Type.STRING } }
               },
               required: ["lip", "blush", "eyeshadow"]
             },
-            hair_recommendations: { type: "ARRAY", items: { type: "STRING" } },
-            fashion_recommendations: { type: "ARRAY", items: { type: "STRING" } },
-            style_tip: { type: "STRING" },
-            photo_quality_note: { type: "STRING" }
+            hair_recommendations: { type: Type.ARRAY, items: { type: Type.STRING } },
+            fashion_recommendations: { type: Type.ARRAY, items: { type: Type.STRING } },
+            style_tip: { type: Type.STRING },
+            photo_quality_note: { type: Type.STRING }
           },
           required: [
             "disclaimer", "summary", "tone_direction", "season_type", 
@@ -128,15 +138,14 @@ app.post("/api/analyze", async (req, res) => {
     }
 
     try {
-      // Sometimes the model might still return markdown blocks even with responseMimeType
-      const jsonStr = text.replace(/```json/g, "").replace(/```/g, "").trim();
-      res.json(JSON.parse(jsonStr));
+      res.json(JSON.parse(text));
     } catch (parseError) {
       console.error("JSON Parse error:", text);
-      throw new Error("분석 결과 형식이 올바르지 않습니다.");
+      const jsonStr = text.replace(/```json/g, "").replace(/```/g, "").trim();
+      res.json(JSON.parse(jsonStr));
     }
   } catch (error: any) {
-    console.error("Analysis error:", error);
+    console.error("Analysis route error:", error);
     const message = error.message || "이미지 분석 중 오류가 발생했습니다.";
     res.status(500).json({ error: message });
   }
@@ -160,8 +169,10 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on http://0.0.0.0:${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error("Failed to start server:", err);
+});

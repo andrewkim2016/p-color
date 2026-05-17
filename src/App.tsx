@@ -72,13 +72,18 @@ export default function App() {
         body: JSON.stringify({ image: preview }),
       });
 
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.error || '분석에 실패했습니다. 다시 시도해주세요.');
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || '분석에 실패했습니다. 다시 시도해주세요.');
+        }
+        setResults(data);
+      } else {
+        const text = await response.text();
+        console.error('Non-JSON response:', text);
+        throw new Error(`서버에서 올바르지 않은 응답을 받았습니다 (Status: ${response.status}). 이 문제가 지속되면 관리자에게 문의하세요.`);
       }
-
-      setResults(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.');
     } finally {
