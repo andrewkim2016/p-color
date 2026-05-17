@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Upload, Sparkles, AlertCircle, Camera, Check, Info, ArrowRight } from 'lucide-react';
 
@@ -56,6 +56,10 @@ export default function App() {
       setError(null);
     }
   };
+
+  useEffect(() => {
+    console.log('[APP] Interface initialized v1.1');
+  }, []);
 
   const analyzeImage = async () => {
     if (!preview) return;

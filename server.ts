@@ -6,18 +6,25 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+const isProduction = process.env.NODE_ENV === "production" || process.env.NODE_ENV === "preview";
+console.log(`[INIT] Running in ${isProduction ? "PRODUCTION" : "DEVELOPMENT"} mode`);
+
 const app = express();
 const PORT = 3000;
 
-// Increase limit for image uploads to handle high-res photos
+// Increase limit for image uploads - must be before routes
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// Log all requests for debugging
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
+
 // Setup Gemini
 const apiKey = process.env.GEMINI_API_KEY;
-
-// Log initialization status
-console.log(`Gemini API Initialized: ${apiKey ? 'YES' : 'NO'}`);
+console.log(`[INIT] Gemini API Key present: ${!!apiKey}`);
 
 const ai = new GoogleGenAI({
   apiKey: apiKey || '',
@@ -28,12 +35,18 @@ const ai = new GoogleGenAI({
   }
 });
 
+// API Routes - Define these explicitly BEFORE any other middleware
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", mode: process.env.NODE_ENV });
+  res.json({ 
+    status: "ok", 
+    mode: process.env.NODE_ENV,
+    time: new Date().toISOString(),
+    apiKeySet: !!apiKey
+  });
 });
 
 app.post("/api/analyze", async (req, res) => {
-  console.log("Analysis request received");
+  console.log("Analysis request received at /api/analyze");
   try {
     if (!apiKey) {
       console.error("GEMINI_API_KEY is missing");
@@ -153,14 +166,25 @@ app.post("/api/analyze", async (req, res) => {
 
 // Vite middleware setup
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
+  const isProductionMode = process.env.NODE_ENV === "production" || process.env.NODE_ENV === "preview";
+
+  if (!isProductionMode) {
+    console.log("[SERVER] Starting Vite middleware (Development)");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    console.log("[SERVER] Serving static files from ./dist (Production)");
+    const distPath = path.resolve(process.cwd(), 'dist');
+    
+    // Explicitly handle unhandled /api requests before static/wildcard
+    app.all('/api/*', (req, res) => {
+      console.warn(`[WARN] Unmatched API path: ${req.method} ${req.url}`);
+      res.status(404).json({ error: `API 경로를 찾을 수 없습니다: ${req.url}` });
+    });
+
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.setHeader('Content-Type', 'text/html');
@@ -169,7 +193,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
+    console.log(`[SERVER] Listening on 0.0.0.0:${PORT}`);
   });
 }
 
